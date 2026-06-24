@@ -1,0 +1,12 @@
+# API key — never commit
+outlook_downloader/config.ps1
+
+# Local output files
+briefs/
+outlook_downloader/emails/
+outlook_downloader/logs/
+
+# Python
+__pycache__/
+*.pyc
+.env
