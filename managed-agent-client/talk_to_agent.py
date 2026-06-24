@@ -27,6 +27,7 @@ def fetch_emails(hours: int = 24) -> str | None:
             ["powershell", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-File", EMAIL_FETCHER, "-Hours", str(hours)],
             capture_output=True, text=True, timeout=60,
+            encoding="utf-8", errors="replace",
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()

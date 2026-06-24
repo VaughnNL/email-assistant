@@ -1,5 +1,7 @@
 param([int]$Hours = 24)
 
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+
 try {
     $outlook   = New-Object -ComObject Outlook.Application
     $namespace = $outlook.GetNamespace("MAPI")
