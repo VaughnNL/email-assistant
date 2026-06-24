@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Minimal client for Anthropic Managed Agent agent_015VHQjSZein5oq1iUZr6wSX."""
+"""Local email assistant — Ollama chat with live Outlook context injection."""
 
+import json
 import os
 import subprocess
 import sys
-import anthropic
+import urllib.request
 
-AGENT_ID       = "agent_015VHQjSZein5oq1iUZr6wSX"
-ENVIRONMENT_ID = "env_01KLJ9UFFW2otvWxy6GAjeyo"
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
+OLLAMA_URL     = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+MODEL          = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
 EMAIL_FETCHER  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "outlook_downloader", "fetch_emails_text.ps1")
 BRIEF_KEYWORDS = {"brief", "email", "inbox", "mail", "summary", "summarise", "summarize"}
 
+SYSTEM_PROMPT = (
+    "You are a personal assistant with access to the user's recent emails when provided. "
+    "Give specific, concrete answers. Be concise and direct."
+)
+
 
 def fetch_emails(hours: int = 24) -> str | None:
-    """Run the local PowerShell email fetcher and return its output, or None on failure."""
     try:
         result = subprocess.run(
             ["powershell", "-NonInteractive", "-ExecutionPolicy", "Bypass",
@@ -31,88 +38,72 @@ def fetch_emails(hours: int = 24) -> str | None:
 
 
 def wants_email_context(message: str) -> bool:
-    words = set(message.lower().split())
-    return bool(words & BRIEF_KEYWORDS)
+    return bool(set(message.lower().split()) & BRIEF_KEYWORDS)
+
+
+def stream_chat(messages: list) -> str:
+    body = json.dumps({"model": MODEL, "messages": messages, "stream": True}).encode("utf-8")
+    req  = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    full = ""
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        for line in resp:
+            if line.strip():
+                chunk = json.loads(line.decode("utf-8"))
+                token = chunk.get("message", {}).get("content", "")
+                if token:
+                    print(token, end="", flush=True)
+                    full += token
+                if chunk.get("done"):
+                    break
+    print()
+    return full
+
+
+def inject_email_context(message: str) -> str:
+    print("Fetching emails from Outlook...", file=sys.stderr)
+    email_data = fetch_emails()
+    if email_data:
+        return email_data + "\n\n" + message
+    print("Could not fetch emails — continuing without context.", file=sys.stderr)
+    return message
 
 
 def main() -> None:
-    user_message = " ".join(sys.argv[1:]) or "Hello! What can you help me with?"
+    history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    if wants_email_context(user_message):
-        print("Fetching emails from local Outlook...", file=sys.stderr)
-        email_data = fetch_emails(hours=24)
-        if email_data:
-            print(f"Email data collected ({len(email_data)} chars). Sending to agent.", file=sys.stderr)
-            user_message = email_data + "\n\n" + user_message
-        else:
-            print("Could not fetch emails — sending message without email context.", file=sys.stderr)
+    # Single-shot mode: message passed as CLI argument
+    if len(sys.argv) > 1:
+        message = " ".join(sys.argv[1:])
+        if wants_email_context(message):
+            message = inject_email_context(message)
+        history.append({"role": "user", "content": message})
+        stream_chat(history)
+        return
 
-    client = anthropic.Anthropic()
+    # Interactive REPL
+    print(f"Assistant ready ({MODEL}) — Ctrl+C to exit\n")
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nBye!")
+            break
 
-    try:
-        session = client.beta.sessions.create(
-            agent=AGENT_ID,
-            environment_id=ENVIRONMENT_ID,
-        )
-    except anthropic.APIConnectionError as e:
-        print(f"Connection error (network/firewall?): {e}", file=sys.stderr)
-        sys.exit(1)
-    except anthropic.AuthenticationError as e:
-        print(f"Authentication error (bad API key?): {e}", file=sys.stderr)
-        sys.exit(1)
-    except anthropic.PermissionDeniedError as e:
-        print(f"Permission denied (key lacks access to this beta?): {e}", file=sys.stderr)
-        sys.exit(1)
-    except anthropic.NotFoundError as e:
-        print(f"Not found (agent/environment ID wrong?): {e}", file=sys.stderr)
-        sys.exit(1)
-    except anthropic.APIStatusError as e:
-        print(f"API error {e.status_code}: {e.message}", file=sys.stderr)
-        sys.exit(1)
-    except anthropic.APIError as e:
-        print(f"Unexpected API error ({type(e).__name__}): {e}", file=sys.stderr)
-        sys.exit(1)
+        if not user_input:
+            continue
 
-    print(f"Session {session.id} created.", file=sys.stderr)
+        message = user_input
+        if wants_email_context(message):
+            message = inject_email_context(message)
 
-    try:
-        with client.beta.sessions.events.stream(session_id=session.id) as stream:
-            client.beta.sessions.events.send(
-                session_id=session.id,
-                events=[
-                    {
-                        "type": "user.message",
-                        "content": [{"type": "text", "text": user_message}],
-                    }
-                ],
-            )
-
-            for event in stream:
-                if event.type == "agent.message":
-                    for block in event.content:
-                        if block.type == "text":
-                            print(block.text, end="", flush=True)
-
-                elif event.type == "session.status_idle":
-                    stop_type = getattr(event.stop_reason, "type", None)
-                    if stop_type != "requires_action":
-                        print()
-                        break
-
-                elif event.type == "session.status_terminated":
-                    print()
-                    break
-
-                elif event.type == "session.error":
-                    print(f"\nSession error: {event}", file=sys.stderr)
-                    sys.exit(1)
-
-    except anthropic.APIError as e:
-        print(f"\nAPI error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
-        sys.exit(130)
+        history.append({"role": "user", "content": message})
+        print("Assistant: ", end="", flush=True)
+        response = stream_chat(history)
+        history.append({"role": "assistant", "content": response})
 
 
 if __name__ == "__main__":

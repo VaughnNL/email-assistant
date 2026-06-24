@@ -3,7 +3,7 @@ param([int]$Hours = 24)
 try {
     $outlook   = New-Object -ComObject Outlook.Application
     $namespace = $outlook.GetNamespace("MAPI")
-    $namespace.Logon()
+    # Skip Logon — reuses existing Outlook session
 } catch {
     Write-Error "Could not connect to Outlook: $_"
     exit 1
