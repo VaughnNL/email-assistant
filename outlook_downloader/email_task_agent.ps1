@@ -8,7 +8,7 @@
 )
 
 $scriptDir  = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$briefsDir  = Join-Path (Split-Path $scriptDir -Parent) "briefs"
+$briefsDir  = Join-Path $env:USERPROFILE "Desktop\briefs"
 New-Item -ItemType Directory -Path $briefsDir -Force | Out-Null
 if (-not $BriefFile) { $BriefFile = Join-Path $briefsDir ((Get-Date -Format "MMdd") + "_Brief.txt") }
 
