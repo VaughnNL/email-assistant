@@ -247,12 +247,14 @@ try {
     $notify        = New-Object System.Windows.Forms.NotifyIcon
     $notify.Icon   = [System.Drawing.SystemIcons]::Information
     $notify.Visible = $true
-    $notify.ShowBalloonTip(8000, "Daily Brief Ready", "Your brief for $(Get-Date -Format 'dd MMM') is on your Desktop: Daily Brief.txt", [System.Windows.Forms.ToolTipIcon]::Info)
+    $notify.ShowBalloonTip(8000, "Daily Brief Ready", "Your brief for $(Get-Date -Format 'dd MMM') is ready.", [System.Windows.Forms.ToolTipIcon]::Info)
     Start-Sleep -Seconds 2
     $notify.Dispose()
 } catch {
     Log "Note: Could not show notification: $_"
 }
+
+Invoke-Item $BriefFile
 
 Log "--- Done. ---"
 
